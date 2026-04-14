@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
     // Create prediction and return immediately — client polls /api/remove-bg/[id]
     const prediction = await replicate.predictions.create({
-      version: 'fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec05c17',
+      model: 'lucataco/remove-bg',
       input: { image },
     })
 
