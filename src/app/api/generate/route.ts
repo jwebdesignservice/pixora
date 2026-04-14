@@ -29,7 +29,7 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, filter, mood } = await req.json()
+    const { prompt, filter, aspectRatio } = await req.json()
 
     if (!prompt) {
       return NextResponse.json(
@@ -38,20 +38,24 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const validRatios = ['1:1', '2:3', '3:2', '4:5', '5:4', '3:4', '4:3', '16:9', '9:16']
+    const ratio = validRatios.includes(aspectRatio) ? aspectRatio : '1:1'
+
     const styleSuffix = filter && STYLE_SUFFIXES[filter] ? `, ${STYLE_SUFFIXES[filter]}` : ''
-    const moodPrefix  = mood ? `${mood} mood, ` : ''
-    const fullPrompt  = `${moodPrefix}${prompt}${styleSuffix}, high quality, print ready, 4k`
+    const fullPrompt  = `${prompt}${styleSuffix}, high quality, print ready, 4k`
 
     const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN })
 
     const prediction = await replicate.predictions.create({
-      model: 'black-forest-labs/flux-schnell',
+      model: 'black-forest-labs/flux-dev',
       input: {
         prompt: fullPrompt,
         num_outputs: 1,
         output_format: 'jpg',
         output_quality: 90,
-        aspect_ratio: '1:1',
+        aspect_ratio: ratio,
+        guidance: 3.5,
+        num_inference_steps: 28,
       },
     })
 
