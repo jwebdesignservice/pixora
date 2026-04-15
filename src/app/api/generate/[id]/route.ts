@@ -20,14 +20,15 @@ export async function GET(
     const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN })
     const prediction = await replicate.predictions.get(id)
 
-    const output = prediction.output
-    const outputUrl =
+    const raw = prediction.output
+    // Always return `output` as an array so the client can populate 3 variant slots
+    const output =
       prediction.status === 'succeeded'
-        ? Array.isArray(output) ? (output[0] as string) : (output as string)
+        ? Array.isArray(raw) ? raw as string[] : [raw as string]
         : null
 
     return NextResponse.json(
-      { status: prediction.status, outputUrl },
+      { status: prediction.status, output },
       { headers: CORS_HEADERS }
     )
   } catch (err) {

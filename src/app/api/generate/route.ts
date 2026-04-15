@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
       model: 'black-forest-labs/flux-dev',
       input: {
         prompt: fullPrompt,
-        num_outputs: 1,
+        num_outputs: 3,
         output_format: 'jpg',
         output_quality: 90,
         aspect_ratio: ratio,

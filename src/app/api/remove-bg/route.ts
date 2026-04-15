@@ -24,23 +24,27 @@ export async function POST(req: NextRequest) {
 
     const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN })
 
-    // Replicate's predictions.create() doesn't accept base64 data URIs directly —
-    // convert to a Blob so the SDK uploads it to Replicate's CDN first.
-    let imageInput: Blob | string = image
+    // lucataco/remove-bg requires an HTTPS URL — it does not accept base64.
+    // Upload the image to the Replicate Files API to get a hosted URL first.
+    let imageUrl: string = image
+
     if (typeof image === 'string' && image.startsWith('data:')) {
       const commaIdx = image.indexOf(',')
-      const header   = image.slice(0, commaIdx)          // e.g. "data:image/jpeg;base64"
-      const b64      = image.slice(commaIdx + 1)
-      const mimeMatch = header.match(/data:([^;]+)/)
-      const mimeType  = mimeMatch ? mimeMatch[1] : 'image/jpeg'
-      const buffer   = Buffer.from(b64, 'base64')
-      imageInput = new Blob([buffer], { type: mimeType })
+      const b64 = image.slice(commaIdx + 1)
+      const mimeMatch = image.match(/data:([^;]+)/)
+      const mimeType = (mimeMatch ? mimeMatch[1] : 'image/jpeg') as `${string}/${string}`
+      const bytes = Uint8Array.from(Buffer.from(b64, 'base64'))
+      const blob = new Blob([bytes], { type: mimeType })
+
+      const fileResponse = await replicate.files.create(blob, {
+        filename: `upload.${mimeType.split('/')[1] ?? 'jpg'}`,
+      })
+      imageUrl = fileResponse.urls.get
     }
 
-    // Create prediction and return immediately — client polls /api/remove-bg/[id]
     const prediction = await replicate.predictions.create({
       model: 'lucataco/remove-bg',
-      input: { image: imageInput },
+      input: { image: imageUrl },
     })
 
     return NextResponse.json(
