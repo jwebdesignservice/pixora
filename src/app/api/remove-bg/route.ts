@@ -52,10 +52,14 @@ export async function POST(req: NextRequest) {
       { headers: CORS_HEADERS }
     )
   } catch (err: unknown) {
-    const e = err as { status?: number; message?: string; detail?: unknown }
-    console.error('[remove-bg] status:', e?.status)
-    console.error('[remove-bg] message:', e?.message)
-    console.error('[remove-bg] detail:', JSON.stringify(e?.detail))
+    const e = err as { status?: number; message?: string; detail?: unknown; stack?: string }
+    console.error('[remove-bg] FULL ERROR:', JSON.stringify({
+      status: e?.status,
+      message: e?.message,
+      detail: e?.detail,
+      stack: e?.stack,
+      raw: String(err),
+    }))
     return NextResponse.json(
       { error: 'Failed to start background removal' },
       { status: 500, headers: CORS_HEADERS }
