@@ -95,10 +95,20 @@ export async function POST(req: NextRequest) {
     const token = process.env.REPLICATE_API_TOKEN!
     const replicate = new Replicate({ auth: token })
 
-    // img2img style transfer — use flux-kontext-pro which preserves image content
+    // img2img mode — use flux-kontext-pro for editing/style transfer
     if (image) {
-      const stylePrompt = STYLE_TRANSFER_PROMPTS[filter]
-        || `Apply a ${filter} artistic style to this image. Keep every detail, shape, object, and composition exactly the same. Only change the artistic rendering style.`
+      // Determine the prompt:
+      // - If user provided a text prompt (e.g. "add a wooly hat"), use it directly for editing
+      // - If a style filter is selected (from step 3), use the style transfer prompt
+      // - If both, combine them
+      let editPrompt: string
+      if (filter && STYLE_TRANSFER_PROMPTS[filter]) {
+        editPrompt = STYLE_TRANSFER_PROMPTS[filter]
+      } else if (prompt) {
+        editPrompt = prompt
+      } else {
+        editPrompt = 'Enhance this image while keeping all details identical.'
+      }
 
       // flux-kontext-pro needs an HTTPS URL, not base64
       let imageUrl: string
@@ -111,7 +121,7 @@ export async function POST(req: NextRequest) {
       const prediction = await replicate.predictions.create({
         model: 'black-forest-labs/flux-kontext-pro',
         input: {
-          prompt: stylePrompt,
+          prompt: editPrompt,
           input_image: imageUrl,
           output_format: 'jpg',
         },
