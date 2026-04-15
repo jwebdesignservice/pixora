@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     // Call Replicate API directly (no SDK) so we get full error visibility.
     // Pass the base64 data URI straight through — the Replicate API handles
     // data URIs for image inputs on models that accept URI type.
-    const res = await fetch(`${REPLICATE_API}/models/lucataco/remove-bg/predictions`, {
+    const res = await fetch(`${REPLICATE_API}/models/bria/remove-background/predictions`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
