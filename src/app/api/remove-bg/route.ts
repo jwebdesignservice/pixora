@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Replicate from 'replicate'
+
+const REPLICATE_API = 'https://api.replicate.com/v1'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -22,44 +23,46 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN })
-
-    // lucataco/remove-bg requires an HTTPS URL — it does not accept base64.
-    // Upload the image to the Replicate Files API to get a hosted URL first.
-    let imageUrl: string = image
-
-    if (typeof image === 'string' && image.startsWith('data:')) {
-      const commaIdx = image.indexOf(',')
-      const b64 = image.slice(commaIdx + 1)
-      const mimeMatch = image.match(/data:([^;]+)/)
-      const mimeType = (mimeMatch ? mimeMatch[1] : 'image/jpeg') as `${string}/${string}`
-      const bytes = Uint8Array.from(Buffer.from(b64, 'base64'))
-      const blob = new Blob([bytes], { type: mimeType })
-
-      const fileResponse = await replicate.files.create(blob, {
-        filename: `upload.${mimeType.split('/')[1] ?? 'jpg'}`,
-      })
-      imageUrl = fileResponse.urls.get
+    const token = process.env.REPLICATE_API_TOKEN
+    if (!token) {
+      console.error('[remove-bg] REPLICATE_API_TOKEN is not set')
+      return NextResponse.json(
+        { error: 'Server misconfigured' },
+        { status: 500, headers: CORS_HEADERS }
+      )
     }
 
-    const prediction = await replicate.predictions.create({
-      model: 'lucataco/remove-bg',
-      input: { image: imageUrl },
+    // Call Replicate API directly (no SDK) so we get full error visibility.
+    // Pass the base64 data URI straight through — the Replicate API handles
+    // data URIs for image inputs on models that accept URI type.
+    const res = await fetch(`${REPLICATE_API}/models/lucataco/remove-bg/predictions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Prefer: 'respond-async',
+      },
+      body: JSON.stringify({ input: { image } }),
     })
 
+    const body = await res.text()
+    console.log('[remove-bg] Replicate response:', res.status, body)
+
+    if (!res.ok) {
+      console.error('[remove-bg] Replicate API error:', res.status, body)
+      return NextResponse.json(
+        { error: `Replicate error ${res.status}` },
+        { status: 502, headers: CORS_HEADERS }
+      )
+    }
+
+    const prediction = JSON.parse(body)
     return NextResponse.json(
       { id: prediction.id, status: prediction.status },
       { headers: CORS_HEADERS }
     )
   } catch (err: unknown) {
-    const e = err as { status?: number; message?: string; detail?: unknown; stack?: string }
-    console.error('[remove-bg] FULL ERROR:', JSON.stringify({
-      status: e?.status,
-      message: e?.message,
-      detail: e?.detail,
-      stack: e?.stack,
-      raw: String(err),
-    }))
+    console.error('[remove-bg] Unexpected error:', String(err))
     return NextResponse.json(
       { error: 'Failed to start background removal' },
       { status: 500, headers: CORS_HEADERS }
