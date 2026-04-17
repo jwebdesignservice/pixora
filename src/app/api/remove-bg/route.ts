@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { resolveIdentity } from '@/lib/auth'
+import {
+  reserveCredit,
+  commitReservation,
+  refundReservation,
+  InsufficientCredits,
+} from '@/lib/credits'
+import { corsHeaders, preflight } from '@/lib/cors'
+import { jsonError } from '@/lib/errors'
 
 const REPLICATE_API = 'https://api.replicate.com/v1'
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+export async function OPTIONS(req: NextRequest) {
+  return preflight(req)
 }
 
 async function uploadToReplicate(base64DataUri: string, token: string): Promise<string> {
-  // Parse data URI: "data:<mime>;base64,<data>"
   const match = base64DataUri.match(/^data:([^;]+);base64,(.+)$/)
   if (!match) throw new Error('Invalid base64 data URI format')
 
@@ -30,18 +32,12 @@ async function uploadToReplicate(base64DataUri: string, token: string): Promise<
 
   const res = await fetch(`${REPLICATE_API}/files`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
     body: formData,
   })
 
   const body = await res.text()
-  console.log('[remove-bg] Files API response:', res.status, body)
-
-  if (!res.ok) {
-    throw new Error(`Replicate Files API error ${res.status}: ${body}`)
-  }
+  if (!res.ok) throw new Error(`Replicate Files API error ${res.status}: ${body}`)
 
   const file = JSON.parse(body)
   const url = file.urls?.get
@@ -50,34 +46,40 @@ async function uploadToReplicate(base64DataUri: string, token: string): Promise<
 }
 
 export async function POST(req: NextRequest) {
+  const cors = corsHeaders(req.headers.get('origin'))
+  const identity = await resolveIdentity(req)
+  if (!identity) return jsonError(req, 401, 'auth_required')
+
+  let reservation: { reservationId: string; balanceAfter: number }
+  try {
+    reservation = await reserveCredit(identity.userId, 'remove_bg')
+  } catch (e) {
+    if (e instanceof InsufficientCredits) {
+      return jsonError(req, 402, 'insufficient_credits', { balance: e.balance })
+    }
+    throw e
+  }
+
   try {
     const { image } = await req.json()
-
     if (!image) {
-      return NextResponse.json(
-        { error: 'image is required' },
-        { status: 400, headers: CORS_HEADERS }
-      )
+      await refundReservation(reservation.reservationId)
+      return NextResponse.json({ error: 'image is required' }, { status: 400, headers: cors })
     }
 
     const token = process.env.REPLICATE_API_TOKEN
     if (!token) {
-      console.error('[remove-bg] REPLICATE_API_TOKEN is not set')
+      await refundReservation(reservation.reservationId)
       return NextResponse.json(
         { error: 'Server misconfigured' },
-        { status: 500, headers: CORS_HEADERS }
+        { status: 500, headers: cors }
       )
     }
 
-    // Replicate models require an HTTPS URL — they don't accept base64 data URIs.
-    // Upload via the Files API first to get a hosted URL.
     let imageUrl: string
     if (image.startsWith('data:')) {
-      console.log('[remove-bg] Uploading base64 image to Replicate Files API...')
       imageUrl = await uploadToReplicate(image, token)
-      console.log('[remove-bg] Uploaded, got URL:', imageUrl)
     } else {
-      // Already an HTTPS URL
       imageUrl = image
     }
 
@@ -92,26 +94,27 @@ export async function POST(req: NextRequest) {
     })
 
     const body = await res.text()
-    console.log('[remove-bg] Replicate response:', res.status, body)
-
     if (!res.ok) {
       console.error('[remove-bg] Replicate API error:', res.status, body)
+      await refundReservation(reservation.reservationId)
       return NextResponse.json(
-        { error: `Replicate error ${res.status}` },
-        { status: 502, headers: CORS_HEADERS }
+        { error: `replicate_error_${res.status}`, refunded: true },
+        { status: 502, headers: cors }
       )
     }
 
     const prediction = JSON.parse(body)
+    await commitReservation(reservation.reservationId, prediction.id)
     return NextResponse.json(
-      { id: prediction.id, status: prediction.status },
-      { headers: CORS_HEADERS }
+      { id: prediction.id, status: prediction.status, balance: reservation.balanceAfter },
+      { headers: cors }
     )
-  } catch (err: unknown) {
+  } catch (err) {
     console.error('[remove-bg] Unexpected error:', String(err))
+    await refundReservation(reservation.reservationId)
     return NextResponse.json(
-      { error: 'Failed to start background removal' },
-      { status: 500, headers: CORS_HEADERS }
+      { error: 'remove_bg_failed', refunded: true },
+      { status: 500, headers: cors }
     )
   }
 }

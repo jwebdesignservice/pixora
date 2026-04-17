@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Replicate from 'replicate'
+import { resolveIdentity } from '@/lib/auth'
+import {
+  reserveCredit,
+  commitReservation,
+  refundReservation,
+  InsufficientCredits,
+} from '@/lib/credits'
+import { corsHeaders, preflight } from '@/lib/cors'
+import { jsonError } from '@/lib/errors'
 
 const REPLICATE_API = 'https://api.replicate.com/v1'
 
@@ -34,14 +43,8 @@ const STYLE_TRANSFER_PROMPTS: Record<string, string> = {
   'portrait':    'Apply a professional studio portrait style to this image. Keep every detail, shape, object, and composition exactly the same. Only enhance the rendering with soft studio lighting and refined tones.',
 }
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+export async function OPTIONS(req: NextRequest) {
+  return preflight(req)
 }
 
 async function uploadToReplicate(base64DataUri: string, token: string): Promise<string> {
@@ -77,15 +80,29 @@ async function uploadToReplicate(base64DataUri: string, token: string): Promise<
 }
 
 export async function POST(req: NextRequest) {
+  const identity = await resolveIdentity(req)
+  if (!identity) return jsonError(req, 401, 'auth_required')
+
+  let reservation: { reservationId: string; balanceAfter: number }
+  try {
+    reservation = await reserveCredit(identity.userId, 'generate')
+  } catch (e) {
+    if (e instanceof InsufficientCredits) {
+      return jsonError(req, 402, 'insufficient_credits', { balance: e.balance })
+    }
+    throw e
+  }
+
+  const cors = corsHeaders(req.headers.get('origin'))
+
   try {
     const { prompt, filter, aspectRatio, image } = await req.json()
 
-    // img2img mode: image + filter required, prompt optional
-    // text-to-image mode: prompt required
     if (!prompt && !image) {
+      await refundReservation(reservation.reservationId)
       return NextResponse.json(
         { error: 'prompt or image is required' },
-        { status: 400, headers: CORS_HEADERS }
+        { status: 400, headers: cors }
       )
     }
 
@@ -127,9 +144,10 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      await commitReservation(reservation.reservationId, prediction.id)
       return NextResponse.json(
-        { id: prediction.id, status: prediction.status },
-        { headers: CORS_HEADERS }
+        { id: prediction.id, status: prediction.status, balance: reservation.balanceAfter },
+        { headers: cors }
       )
     }
 
@@ -150,15 +168,17 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    await commitReservation(reservation.reservationId, prediction.id)
     return NextResponse.json(
-      { id: prediction.id, status: prediction.status },
-      { headers: CORS_HEADERS }
+      { id: prediction.id, status: prediction.status, balance: reservation.balanceAfter },
+      { headers: cors }
     )
   } catch (err) {
     console.error('[generate] Error:', err)
+    await refundReservation(reservation.reservationId)
     return NextResponse.json(
-      { error: 'Failed to start generation' },
-      { status: 500, headers: CORS_HEADERS }
+      { error: 'generation_failed', refunded: true },
+      { status: 500, headers: cors }
     )
   }
 }
