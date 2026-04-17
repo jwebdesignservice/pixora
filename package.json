@@ -5,16 +5,32 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.2",
     "next": "^14.2.0",
-    "replicate": "^0.34.0"
+    "pg": "^8.20.0",
+    "replicate": "^0.34.0",
+    "resend": "^6.12.0",
+    "stripe": "^22.0.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
-    "typescript": "^5"
+    "@vitest/ui": "^4.1.4",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^4.1.4"
   }
 }
