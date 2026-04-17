@@ -7,10 +7,14 @@ declare global {
   var __pixora_pool: Pool | undefined
 }
 
+// Prefer DATABASE_URL (local .env.local) but fall back to POSTGRES_URL
+// which the Vercel Supabase integration auto-sets in production.
+const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL
+
 const pool =
   global.__pixora_pool ??
   new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString,
     max: 5,
   })
 
